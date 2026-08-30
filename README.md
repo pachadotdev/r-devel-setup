@@ -25,6 +25,20 @@ If you wish to use the development Clang compiler that CRAN uses, run
 bash build_r_devel.sh --clang="yes" --clang-devel="yes"
 ```
 
+After installing I see this:
+
+```bash
+R CMD config CC
+# /opt/llvm-23.1.0/bin/clang -std=C23
+
+R CMD config CC
+# /opt/llvm-23.1.0/bin/clang -std=c++20
+
+Rscript -e "tinydev::check_cpp_compiler()"
+# using C++ compiler: ‘clang version 23.1.0 (https://github.com/llvm/llvm-project.git ea7d852a70e8bdfaf601d6626a760f9771b2c4b4)’
+# /opt/llvm-23.1.0/bin/clang++ -std=c++20
+```
+
 ## Create a diff for BugZilla
 
 Example for https://bugs.r-project.org/show_bug.cgi?id=18693

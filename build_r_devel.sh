@@ -5,6 +5,7 @@ set -euo pipefail
 # Parse command-line arguments
 CLANG_DEVEL="no"
 CLANG="no"
+BUILD_DIR_OVERRIDE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --clang-devel=*)
@@ -13,6 +14,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --clang=*)
       CLANG="${1#*=}"
+      shift
+      ;;
+    --build-dir=*)
+      BUILD_DIR_OVERRIDE="${1#*=}"
       shift
       ;;
     *)
@@ -28,9 +33,9 @@ CLANG_README_URL="https://www.stats.ox.ac.uk/pub/bdr/clang23/README.txt"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 R_SOURCE_DIR="${SCRIPT_DIR}/trunk"
-R_TARBALL_URL="https://cran.r-project.org/src/base-prerelease/R-devel.tar.gz"
-R_TARBALL="${SCRIPT_DIR}/R-devel.tar.gz"
-R_RECOMMENDED_TAR="${SCRIPT_DIR}/R-devel-recommended.tar.gz"
+# Build out-of-source (sibling of trunk, so the SVN working copy stays clean)
+# so multiple independent builds can share the same checked-out source.
+R_BUILD_DIR="${BUILD_DIR_OVERRIDE:-${SCRIPT_DIR}/build}"
 
 # Detect Linux distribution
 detect_distro() {
@@ -121,145 +126,114 @@ else
   cd ..
 fi
 
-# Download recommended packages from tarball and extract only those
-echo "==============================="
-echo "Downloading recommended packages from tarball"
-echo "==============================="
-curl -L -o "${R_TARBALL}" "${R_TARBALL_URL}"
-
-# Verify tarball was downloaded
-if [ ! -f "${R_TARBALL}" ] || [ ! -s "${R_TARBALL}" ]; then
-  echo "ERROR: Failed to download R-devel tarball"
-  exit 1
-fi
-echo "Tarball downloaded: $(ls -lh ${R_TARBALL} | awk '{print $5}')"
-
-# Extract only the Recommended directory from the tarball
-echo "Extracting recommended packages..."
-mkdir -p "${R_SOURCE_DIR}/src/library"
-
-# strip-components=3 removes "R-devel/src/library/" leaving "Recommended/..." → goes into src/library/
-tar -xzf "${R_TARBALL}" \
-  -C "${R_SOURCE_DIR}/src/library/" \
-  "R-devel/src/library/Recommended/" \
-  --strip-components=3
-
-# Verify packages were extracted (both .tar.gz and .tgz)
-PACKAGE_COUNT=$(ls -1 "${R_SOURCE_DIR}/src/library/Recommended"/*.tar.gz "${R_SOURCE_DIR}/src/library/Recommended"/*.tgz 2>/dev/null | wc -l)
-if [ "$PACKAGE_COUNT" -eq 0 ]; then
-  echo "ERROR: No recommended packages found in ${R_SOURCE_DIR}/src/library/Recommended/"
-  echo "Contents:"
-  ls -la "${R_SOURCE_DIR}/src/library/Recommended/" || true
-  exit 1
-else
-  echo "Successfully extracted $PACKAGE_COUNT recommended packages"
+# An out-of-source build uses VPATH into the source tree, so any leftovers from
+# a previous in-source build (Makefiles, *.d, *.o, ...) get picked up there and
+# make then considers targets such as src/appl/integrate.d "up to date" without
+# ever creating them in the build directory. Wipe them before configuring.
+if [ -f "${R_SOURCE_DIR}/Makefile" ] || \
+   [ -n "$(find "${R_SOURCE_DIR}/src" -name '*.d' -o -name '*.o' -o -name '*.a' 2>/dev/null | head -n 1)" ]; then
+  echo "==============================="
+  echo "Cleaning stale in-source build artifacts from ${R_SOURCE_DIR}"
+  echo "==============================="
+  if [ -f "${R_SOURCE_DIR}/Makefile" ]; then
+    (cd "${R_SOURCE_DIR}" && make distclean >/dev/null 2>&1) || true
+  fi
+  find "${R_SOURCE_DIR}/src" \
+    \( -name '*.d' -o -name '*.o' -o -name '*.a' -o -name '*.lo' -o -name '*.la' \
+       -o -name 'Makedeps' -o -name 'stamp-lo' \) -delete 2>/dev/null || true
+  rm -f "${R_SOURCE_DIR}/Makefile" "${R_SOURCE_DIR}/Makeconf" \
+        "${R_SOURCE_DIR}/config.status" "${R_SOURCE_DIR}/config.log"
 fi
 
-# Cleanup tarball
-rm -f "${R_TARBALL}"
+# Download or update recommended packages and create the required symlinks
+echo "==============================="
+echo "Fetching recommended packages"
+echo "==============================="
+"${R_SOURCE_DIR}/tools/fetch-recommended"
 
-# Configure ~/.R/Makevars based on compiler flags
-MAKEVARS_DIR="${HOME}/.R"
-MAKEVARS_FILE="${MAKEVARS_DIR}/Makevars"
+# Configure R's build and package-install toolchain
+CONFIG_SITE="${R_SOURCE_DIR}/config.site"
+CONFIG_MARKER="build_r_devel.sh compiler settings"
 
-mkdir -p "${MAKEVARS_DIR}"
+sed -i "/^# BEGIN ${CONFIG_MARKER}$/,/^# END ${CONFIG_MARKER}$/d" "${CONFIG_SITE}"
 
 if [[ "$CLANG_DEVEL" == "yes" && "$CLANG" == "yes" ]]; then
-  echo "Setting up Makevars for LLVM/Clang devel..."
-  if [ -f "${MAKEVARS_FILE}" ]; then
-    cp "${MAKEVARS_FILE}" "${MAKEVARS_FILE}.old"
-    echo "Backed up existing Makevars to ${MAKEVARS_FILE}.old"
-  fi
-  cat > "${MAKEVARS_FILE}" <<EOF
+  echo "Setting up config.site for LLVM/Clang devel..."
+  cat >> "${CONFIG_SITE}" <<EOF
+
+# BEGIN ${CONFIG_MARKER}
 CC=${CLANG_INSTALL_PATH}/bin/clang
+CC23="${CLANG_INSTALL_PATH}/bin/clang -std=c23"
 CXX=${CLANG_INSTALL_PATH}/bin/clang++
-CXX11=${CLANG_INSTALL_PATH}/bin/clang++
-CXX14=${CLANG_INSTALL_PATH}/bin/clang++
 CXX17=${CLANG_INSTALL_PATH}/bin/clang++
 CXX20=${CLANG_INSTALL_PATH}/bin/clang++
-SHLIB_CXXLD=${CLANG_INSTALL_PATH}/bin/clang++
-AR=${CLANG_INSTALL_PATH}/bin/llvm-ar
-RANLIB=${CLANG_INSTALL_PATH}/bin/llvm-ranlib
-LDFLAGS=-fuse-ld=${CLANG_INSTALL_PATH}/bin/ld.lld
-FC=/usr/bin/gfortran
-F77=/usr/bin/gfortran
-CXX11STD=-std=c++11
-CXX14STD=-std=c++14
+CXX23=${CLANG_INSTALL_PATH}/bin/clang++
+CXX26=${CLANG_INSTALL_PATH}/bin/clang++
 CXX17STD=-std=c++17
 CXX20STD=-std=c++20
+CXX23STD=-std=c++23
+CXX26STD=-std=c++26
+AR=${CLANG_INSTALL_PATH}/bin/llvm-ar
+NM=${CLANG_INSTALL_PATH}/bin/llvm-nm
+RANLIB=${CLANG_INSTALL_PATH}/bin/llvm-ranlib
+LDFLAGS="-fuse-ld=${CLANG_INSTALL_PATH}/bin/ld.lld"
+FC=/usr/bin/gfortran
+# END ${CONFIG_MARKER}
 EOF
 elif [[ "$CLANG_DEVEL" != "yes" && "$CLANG" == "yes" ]]; then
-  echo "Setting up Makevars for system Clang..."
-  if [ -f "${MAKEVARS_FILE}" ]; then
-    cp "${MAKEVARS_FILE}" "${MAKEVARS_FILE}.old"
-    echo "Backed up existing Makevars to ${MAKEVARS_FILE}.old"
-  fi
-  cat > "${MAKEVARS_FILE}" <<'EOF'
+  echo "Setting up config.site for system Clang..."
+  cat >> "${CONFIG_SITE}" <<EOF
+
+# BEGIN ${CONFIG_MARKER}
 CC=clang
+CC23="clang -std=c23"
 CXX=clang++
-CXX11=clang++
-CXX14=clang++
 CXX17=clang++
 CXX20=clang++
+CXX23=clang++
+CXX26=clang++
 CXX17STD=-std=c++17
 CXX20STD=-std=c++20
+CXX23STD=-std=c++23
+CXX26STD=-std=c++26
 FC=gfortran
-F77=gfortran
 AR=llvm-ar
 NM=llvm-nm
 RANLIB=llvm-ranlib
-LDFLAGS=-fuse-ld=lld
+LDFLAGS="-fuse-ld=lld"
+# END ${CONFIG_MARKER}
 EOF
 else
-  echo "Using default system compilers (no Makevars changes)"
-fi
-
-if [ -f "${MAKEVARS_FILE}" ]; then
-  echo "Makevars written to ${MAKEVARS_FILE}"
+  echo "Using default system compilers (no config.site overrides)"
 fi
 
 echo "==============================="
 echo "Building R-devel from source"
+echo "Build directory: ${R_BUILD_DIR}"
 echo "Installation prefix: ${R_DEVEL_PREFIX}"
 echo "==============================="
 
-cd "${R_SOURCE_DIR}"
+mkdir -p "${R_BUILD_DIR}"
+mkdir -p "${R_BUILD_DIR}/include"
+cd "${R_BUILD_DIR}"
 
-# Configure R
+# Configure R (out-of-source; srcdir's config.site is still picked up automatically)
 echo "Configuring R..."
-if [[ "$CLANG" == "yes" ]]; then
-  CC="clang" \
-  CXX="clang++" \
-  CXX17="clang++" \
-  CXX20="clang++" \
-  FC="gfortran" \
-  F77="gfortran" \
-  AR="llvm-ar" \
-  NM="llvm-nm" \
-  RANLIB="llvm-ranlib" \
-  LDFLAGS="-fuse-ld=lld" \
-  ./configure \
-    --prefix="${R_DEVEL_PREFIX}" \
-    --enable-R-shlib \
-    --with-blas \
-    --with-lapack \
-    --with-readline \
-    --with-x=no
-else
-  ./configure \
-    --prefix="${R_DEVEL_PREFIX}" \
-    --enable-R-shlib \
-    --with-blas \
-    --with-lapack \
-    --with-readline \
-    --with-x=no
-fi
+"${R_SOURCE_DIR}/configure" \
+  --prefix="${R_DEVEL_PREFIX}" \
+  --enable-R-shlib \
+  --with-blas \
+  --with-lapack \
+  --with-readline \
+  --with-x=no
+
 
 # Build R
 echo "Building R (this may take a while)..."
 make -j$(nproc)
 
-# Install R (requires sudo for /opt)
+# The uninstalled build already works: "${R_BUILD_DIR}/bin/R" can be run directly.
+# Install R system-wide too (requires sudo for /opt)
 echo "Installing R to ${R_DEVEL_PREFIX}..."
 sudo make install
 
@@ -269,6 +243,7 @@ if [ -x "${R_DEVEL_PREFIX}/bin/R" ]; then
   echo "R-devel installed successfully!"
   echo "R version:"
   "${R_DEVEL_PREFIX}/bin/R" --version | head -n 1
+  echo "Uninstalled build binary also available at: ${R_BUILD_DIR}/bin/R"
   echo "==============================="
 else
   echo "ERROR: R-devel installation failed"
@@ -276,4 +251,5 @@ else
 fi
 
 # Link Rdevel executable (overwrite if already exists)
-sudo ln -sf "${R_DEVEL_PREFIX}/bin/R" /usr/local/bin/Rdevel
+sudo ln -sf "${R_DEVEL_PREFIX}/bin/R" /usr/local/bin/R
+sudo ln -sf "${R_DEVEL_PREFIX}/bin/Rscript" /usr/local/bin/Rscript

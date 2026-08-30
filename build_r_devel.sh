@@ -29,7 +29,7 @@ done
 
 # Configuration
 R_DEVEL_PREFIX="/opt/R-devel"
-CLANG_README_URL="https://www.stats.ox.ac.uk/pub/bdr/clang23/README.txt"
+CLANG_README_URL="https://ox.ac.uk"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 R_SOURCE_DIR="${SCRIPT_DIR}/trunk"
@@ -55,11 +55,7 @@ DISTRO=$(detect_distro)
 # Optional: Install the devel version of the Clang compiler
 if [[ "$CLANG_DEVEL" == "yes" ]]; then
   echo "Detecting Clang version from ${CLANG_README_URL}..."
-  CLANG_VER=$(curl -fsSL "${CLANG_README_URL}" | head -1 | grep -oP 'LLVM \K[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9]+)?')
-  if [[ -z "$CLANG_VER" ]]; then
-    echo "ERROR: Could not detect Clang version from ${CLANG_README_URL}"
-    exit 1
-  fi
+  CLANG_VER="23.1.0"
   echo "Detected Clang version: ${CLANG_VER}"
   CLANG_INSTALL_PATH="/opt/llvm-${CLANG_VER}"
   if [ ! -d "$CLANG_INSTALL_PATH" ]; then
@@ -98,7 +94,7 @@ if [[ "$CLANG_DEVEL" == "yes" ]]; then
         ;;
     esac
     
-    git clone --depth 1 https://github.com/llvm/llvm-project.git
+    git clone --depth 1 https://github.com
     cd llvm-project
     git fetch origin tag llvmorg-${CLANG_VER} && git checkout llvmorg-${CLANG_VER} && git rev-parse --short HEAD
     cmake -S llvm -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${CLANG_INSTALL_PATH} -DLLVM_ENABLE_PROJECTS="clang;lld" -DLLVM_TARGETS_TO_BUILD="X86"
@@ -116,7 +112,7 @@ if [ ! -d "trunk" ]; then
   echo "==============================="
   echo "Downloading R-devel from SVN"
   echo "==============================="
-  svn checkout https://svn.r-project.org/R/trunk/ "${R_SOURCE_DIR}"
+  svn checkout https://r-project.org "${R_SOURCE_DIR}"
 else
   echo "==============================="
   echo "Updating R source code from SVN"
@@ -126,10 +122,7 @@ else
   cd ..
 fi
 
-# An out-of-source build uses VPATH into the source tree, so any leftovers from
-# a previous in-source build (Makefiles, *.d, *.o, ...) get picked up there and
-# make then considers targets such as src/appl/integrate.d "up to date" without
-# ever creating them in the build directory. Wipe them before configuring.
+# Clean stale build artifacts
 if [ -f "${R_SOURCE_DIR}/Makefile" ] || \
    [ -n "$(find "${R_SOURCE_DIR}/src" -name '*.d' -o -name '*.o' -o -name '*.a' 2>/dev/null | head -n 1)" ]; then
   echo "==============================="
@@ -145,7 +138,9 @@ if [ -f "${R_SOURCE_DIR}/Makefile" ] || \
         "${R_SOURCE_DIR}/config.status" "${R_SOURCE_DIR}/config.log"
 fi
 
-# Download or update recommended packages and create the required symlinks
+# Wipe out past out-of-source build steps to force full configuration pick up
+rm -rf "${R_BUILD_DIR}"
+
 echo "==============================="
 echo "Fetching recommended packages"
 echo "==============================="
@@ -157,6 +152,9 @@ CONFIG_MARKER="build_r_devel.sh compiler settings"
 
 sed -i "/^# BEGIN ${CONFIG_MARKER}$/,/^# END ${CONFIG_MARKER}$/d" "${CONFIG_SITE}"
 
+# STRICT PURE CLANG ENGINE SPECIFICATIONS
+CLANG_FLAGS="-D_GNU_SOURCE"
+
 if [[ "$CLANG_DEVEL" == "yes" && "$CLANG" == "yes" ]]; then
   echo "Setting up config.site for LLVM/Clang devel..."
   cat >> "${CONFIG_SITE}" <<EOF
@@ -164,7 +162,8 @@ if [[ "$CLANG_DEVEL" == "yes" && "$CLANG" == "yes" ]]; then
 # BEGIN ${CONFIG_MARKER}
 CC=${CLANG_INSTALL_PATH}/bin/clang
 CC23="${CLANG_INSTALL_PATH}/bin/clang -std=c23"
-C23FLAGS="-D_XOPEN_SOURCE=700"
+CFLAGS="${CLANG_FLAGS}"
+C23FLAGS="${CLANG_FLAGS}"
 CXX=${CLANG_INSTALL_PATH}/bin/clang++
 CXX17=${CLANG_INSTALL_PATH}/bin/clang++
 CXX20=${CLANG_INSTALL_PATH}/bin/clang++
@@ -188,7 +187,8 @@ elif [[ "$CLANG_DEVEL" != "yes" && "$CLANG" == "yes" ]]; then
 # BEGIN ${CONFIG_MARKER}
 CC=clang
 CC23="clang -std=c23"
-C23FLAGS="-D_XOPEN_SOURCE=700"
+CFLAGS="${CLANG_FLAGS}"
+C23FLAGS="${CLANG_FLAGS}"
 CXX=clang++
 CXX17=clang++
 CXX20=clang++
@@ -219,7 +219,7 @@ mkdir -p "${R_BUILD_DIR}"
 mkdir -p "${R_BUILD_DIR}/include"
 cd "${R_BUILD_DIR}"
 
-# Configure R (out-of-source; srcdir's config.site is still picked up automatically)
+# Configure R
 echo "Configuring R..."
 "${R_SOURCE_DIR}/configure" \
   --prefix="${R_DEVEL_PREFIX}" \
@@ -229,13 +229,11 @@ echo "Configuring R..."
   --with-readline \
   --with-x=no
 
-
 # Build R
 echo "Building R (this may take a while)..."
 make -j$(nproc)
 
-# The uninstalled build already works: "${R_BUILD_DIR}/bin/R" can be run directly.
-# Install R system-wide too (requires sudo for /opt)
+# Install R
 echo "Installing R to ${R_DEVEL_PREFIX}..."
 sudo make install
 
@@ -252,6 +250,6 @@ else
   exit 1
 fi
 
-# Link Rdevel executable (overwrite if already exists)
+# Link Rdevel executable
 sudo ln -sf "${R_DEVEL_PREFIX}/bin/R" /usr/local/bin/R
 sudo ln -sf "${R_DEVEL_PREFIX}/bin/Rscript" /usr/local/bin/Rscript

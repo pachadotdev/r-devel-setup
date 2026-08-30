@@ -1,3 +1,5 @@
 trunk
 build
+build*
+R-*
 llvm-project

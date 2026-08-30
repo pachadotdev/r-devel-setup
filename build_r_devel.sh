@@ -164,6 +164,7 @@ if [[ "$CLANG_DEVEL" == "yes" && "$CLANG" == "yes" ]]; then
 # BEGIN ${CONFIG_MARKER}
 CC=${CLANG_INSTALL_PATH}/bin/clang
 CC23="${CLANG_INSTALL_PATH}/bin/clang -std=c23"
+C23FLAGS="-D_XOPEN_SOURCE=700"
 CXX=${CLANG_INSTALL_PATH}/bin/clang++
 CXX17=${CLANG_INSTALL_PATH}/bin/clang++
 CXX20=${CLANG_INSTALL_PATH}/bin/clang++
@@ -187,6 +188,7 @@ elif [[ "$CLANG_DEVEL" != "yes" && "$CLANG" == "yes" ]]; then
 # BEGIN ${CONFIG_MARKER}
 CC=clang
 CC23="clang -std=c23"
+C23FLAGS="-D_XOPEN_SOURCE=700"
 CXX=clang++
 CXX17=clang++
 CXX20=clang++

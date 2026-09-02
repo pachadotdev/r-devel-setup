@@ -112,7 +112,7 @@ if [ ! -d "trunk" ]; then
   echo "==============================="
   echo "Downloading R-devel from SVN"
   echo "==============================="
-  svn checkout https://r-project.org "${R_SOURCE_DIR}"
+  svn checkout https://svn.r-project.org/R/trunk/ "${R_SOURCE_DIR}"
 else
   echo "==============================="
   echo "Updating R source code from SVN"
@@ -176,7 +176,7 @@ CXX26STD=-std=c++26
 AR=${CLANG_INSTALL_PATH}/bin/llvm-ar
 NM=${CLANG_INSTALL_PATH}/bin/llvm-nm
 RANLIB=${CLANG_INSTALL_PATH}/bin/llvm-ranlib
-LDFLAGS="-fuse-ld=${CLANG_INSTALL_PATH}/bin/ld.lld"
+LDFLAGS="-fuse-ld=${CLANG_INSTALL_PATH}/bin/ld.lld -lmvec -lm"
 FC=/usr/bin/gfortran
 # END ${CONFIG_MARKER}
 EOF
@@ -224,6 +224,7 @@ echo "Configuring R..."
 "${R_SOURCE_DIR}/configure" \
   --prefix="${R_DEVEL_PREFIX}" \
   --enable-R-shlib \
+  --enable-memory-profiling \
   --with-blas \
   --with-lapack \
   --with-readline \
@@ -252,4 +253,4 @@ fi
 
 # Link Rdevel executable
 sudo ln -sf "${R_DEVEL_PREFIX}/bin/R" /usr/local/bin/R
-sudo ln -sf "${R_DEVEL_PREFIX}/bin/Rscript" /usr/local/bin/Rscript
+sudo ln -sf "${R_DEVEL_PREFIX}/bin/Rscript" /usr/local/bin/R

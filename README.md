@@ -39,16 +39,20 @@ Rscript -e "tinydev::check_cpp_compiler()"
 # /opt/llvm-23.1.0/bin/clang++ -std=c++20
 ```
 
+To test a suggested patch run:
+
+```bash
+bash build_r_devel.sh --patch=/path/to/your.patch
+```
+
 ## Build R-devel on Windows
 
 I found diverging answers on Google. Here is a "curious" mashup of Google and Copilot answers that I edited to get a working setup.
 
-`build_r_devel.sh` is written for Linux (it uses `apt-get`/`dnf`/`pacman`, `sudo`,
-`make install`, symlinks in `/usr/local/bin`, etc.), so it cannot be run as-is on
-Windows. Instead, use `build_r_devel_windows.sh`, an adaptation of the Linux
-script for the [Rtools45](https://cran.r-project.org/bin/windows/Rtools/)
+`build_r_devel_windows.sh` is an adaptation of the Linux script for the [Rtools45](https://cran.r-project.org/bin/windows/Rtools/)
 toolchain that automates the process described in the official CRAN guide,
 [*Howto: Building R-devel and packages on Windows*](https://cran.r-project.org/bin/windows/base/howto-R-devel.html).
+
 This is what I use to test a patch against R-devel on Windows.
 
 ### 1. Install Rtools45
@@ -143,8 +147,7 @@ entirely and instead build without `tcltk` — see the
 
 ### 3. Open the Rtools45 shell
 
-Use the "Rtools45 Bash" shell (or a terminal with `C:\rtools45\usr\bin` and the
-compiler `bin` directory on `PATH`) for all the steps below, instead of Git Bash
+Use the "Rtools45 Bash" shell for all the steps below, instead of Git Bash
 or WSL. `build_r_devel_windows.sh` checks for `make` and `svn` on `PATH` and
 exits early with an explanatory error if it is not run from a compatible shell.
 
@@ -157,9 +160,7 @@ recommended packages, then runs `make all recommended`):
 bash build_r_devel_windows.sh
 ```
 
-If you want to test a patch/local change against R-devel before building
-(analogous to the `svn diff` step in this repo, see below), pass it with
-`--patch`. The script tries `svn patch` first and falls back to `patch -p0`:
+To test a patch:
 
 ```bash
 bash build_r_devel_windows.sh --patch=/path/to/your.patch

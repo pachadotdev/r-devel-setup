@@ -6,6 +6,7 @@ set -euo pipefail
 CLANG_DEVEL="no"
 CLANG="no"
 BUILD_DIR_OVERRIDE=""
+PATCH_FILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --clang-devel=*)
@@ -18,6 +19,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --build-dir=*)
       BUILD_DIR_OVERRIDE="${1#*=}"
+      shift
+      ;;
+    --patch=*)
+      PATCH_FILE="${1#*=}"
       shift
       ;;
     *)
@@ -140,6 +145,43 @@ fi
 
 # Wipe out past out-of-source build steps to force full configuration pick up
 rm -rf "${R_BUILD_DIR}"
+
+# Apply patch if provided
+if [ -n "$PATCH_FILE" ]; then
+  if [ ! -f "$PATCH_FILE" ]; then
+    echo "ERROR: Patch file not found: $PATCH_FILE"
+    exit 1
+  fi
+  
+  echo "==============================="
+  echo "Applying patch: $PATCH_FILE"
+  echo "==============================="
+  cd "${R_SOURCE_DIR}"
+  
+  # Try svn patch first, fall back to patch -p0
+  if command -v svn &>/dev/null; then
+    if svn patch "$PATCH_FILE" 2>/dev/null; then
+      echo "Patch applied successfully with svn patch"
+    else
+      echo "svn patch failed, trying patch -p0..."
+      if patch -p0 < "$PATCH_FILE"; then
+        echo "Patch applied successfully with patch -p0"
+      else
+        echo "ERROR: Failed to apply patch"
+        exit 1
+      fi
+    fi
+  else
+    if patch -p0 < "$PATCH_FILE"; then
+      echo "Patch applied successfully with patch -p0"
+    else
+      echo "ERROR: Failed to apply patch"
+      exit 1
+    fi
+  fi
+  
+  cd ..
+fi
 
 echo "==============================="
 echo "Fetching recommended packages"
